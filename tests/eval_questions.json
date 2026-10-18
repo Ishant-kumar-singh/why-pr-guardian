@@ -1,0 +1,35 @@
+[
+  {
+    "question": "Why does the requests library handle connection retries?",
+    "expected_prs": [],
+    "expected_issues": [],
+    "expected_decisions": [],
+    "manual_review_status": "TODO: fill expected evidence after checking by hand",
+    "note": "Check the strict-domain retry or proxy decisions after running Ask"
+  },
+  {
+    "question": "Who are the main contributors to the session handling code?",
+    "expected_people": [],
+    "manual_review_status": "TODO: fill expected evidence after checking by hand",
+    "note": "Fill in after running who_knows_file on src/requests/sessions.py"
+  },
+  {
+    "question": "Which past decisions affect the timeout configuration?",
+    "expected_decisions": [],
+    "manual_review_status": "TODO: fill expected evidence after checking by hand",
+    "note": "Fill in after querying decisions mentioning 'timeout'"
+  },
+  {
+    "question": "What files most often change together with the main session file?",
+    "expected_files": [],
+    "manual_review_status": "TODO: fill expected evidence after checking by hand",
+    "note": "Fill in after running related_files"
+  },
+  {
+    "question": "Why was a specific authentication approach chosen?",
+    "expected_prs": [],
+    "expected_decisions": [],
+    "manual_review_status": "TODO: fill expected evidence after checking by hand",
+    "note": "Fill in after finding decisions about authentication"
+  }
+]

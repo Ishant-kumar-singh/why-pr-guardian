@@ -1,0 +1,8 @@
+fastapi==0.143.3
+uvicorn[standard]==0.54.0
+httpx==0.28.1
+openai==3.31.0
+falkordb==1.8.0
+networkx==3.6.1
+mcp==1.30.0
+python-dotenv==1.2.4

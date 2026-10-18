@@ -1,0 +1,20 @@
+[
+  {
+    "case": "known conflicting hook annotation",
+    "pr_number": 1,
+    "expected_conflict": "TODO: fill after checking by hand",
+    "expected_decision_pr": "TODO: fill after checking by hand",
+    "expected_reviewers": "TODO: fill after checking by hand"
+  },
+  {
+    "case": "known non-conflicting docs-only PR",
+    "pr_number": "TODO: choose an existing docs-only PR on GUARD_REPO",
+    "expected_conflict": "TODO: fill after checking by hand",
+    "expected_comment": "TODO: fill after checking by hand"
+  },
+  {
+    "case": "unknown PR in GUARD_REPO",
+    "pr_number": 7609,
+    "expected_error": "TODO: fill after checking by hand"
+  }
+]

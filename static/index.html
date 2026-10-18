@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Why? – PR Guardian</title>
+  <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+  <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+  <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0d1117; color: #c9d1d9; line-height: 1.6;
+    }
+    header { 
+      background: #161b22; border-bottom: 1px solid #30363d;
+      padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center;
+    }
+    h1 { font-size: 1.5rem; font-weight: 600; }
+    .tabs { display: flex; gap: 0.5rem; }
+    .tab { 
+      padding: 0.5rem 1rem; cursor: pointer; border-radius: 6px;
+      background: transparent; border: 1px solid #30363d;
+    }
+    .tab.active { background: #21262d; border-color: #58a6ff; }
+    main { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(420px, 1.2fr); height: calc(100vh - 70px); min-height: 520px; }
+    .panel { min-width: 0; padding: 1.5rem; overflow-y: auto; }
+    .panel.graph { min-height: 420px; height: 100%; padding: 0; background: #0d1117; position: relative; display: flex; flex-direction: column; overflow: hidden; }
+    #cy { width: 100%; min-height: 420px; height: 100%; flex: 1 1 auto; }
+    #graph-controls { position: absolute; z-index: 6; top: 1rem; right: 1rem; }
+    #graph-placeholder { position: absolute; inset: 50% 1rem auto; transform: translateY(-50%); text-align: center; color: #8b949e; pointer-events: none; }
+    #graph-tooltip { position: absolute; display: none; z-index: 5; max-width: 360px; padding: 0.5rem 0.75rem; color: #c9d1d9; background: #161b22; border: 1px solid #484f58; border-radius: 6px; pointer-events: none; }
+    .form-group { margin-bottom: 1rem; }
+    label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+    input, textarea { 
+      width: 100%; padding: 0.5rem; background: #0d1117; 
+      border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9;
+    }
+    button { 
+      padding: 0.5rem 1rem; background: #238636; color: white;
+      border: none; border-radius: 6px; cursor: pointer; font-weight: 500;
+    }
+    button:hover { background: #2ea043; }
+    button:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+    .step { 
+      padding: 0.75rem; background: #161b22; border: 1px solid #30363d;
+      border-radius: 6px; margin-bottom: 0.5rem;
+    }
+    .graph-node { width: 150px; height: 54px; }
+    .comment-box { 
+      background: #161b22; padding: 1rem; border-radius: 6px;
+      border: 1px solid #30363d; margin: 1rem 0;
+    }
+    #guard-drafted-comment { min-height: 220px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .bar { 
+      height: 24px; background: #238636; border-radius: 3px;
+      display: inline-block; margin-right: 0.5rem;
+    }
+    .hide { display: none; }
+    .loading { opacity: 0.6; }
+    .example { 
+      cursor: pointer; padding: 0.5rem; background: #161b22;
+      border: 1px solid #30363d; border-radius: 6px; margin-bottom: 0.5rem;
+    }
+    .example:hover { border-color: #58a6ff; }
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    @media (max-width: 850px) {
+      header { padding: 0.75rem; gap: 0.5rem; flex-wrap: wrap; }
+      h1 { font-size: 1.15rem; }
+      main { display: flex; flex-direction: column; height: auto; min-height: 0; }
+      main > .panel:not(.graph) { min-height: 300px; }
+      .panel.graph { flex: none; height: 55vh; min-height: 420px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Why? – the PR guardian that knows the reasons</h1>
+    <div class="tabs">
+      <div class="tab active" onclick="showTab('guardian')">Guardian</div>
+      <div class="tab" onclick="showTab('ask')">Ask</div>
+      <div class="tab" onclick="showTab('busfactor')">Bus Factor</div>
+    </div>
+  </header>
+  
+  <main>
+    <div id="guardian-tab" class="panel">
+      <h2>Guardian</h2>
+      <p style="margin: 1rem 0; color: #8b949e;">Enter a PR number from the guard repo to check for conflicts with past decisions.</p>
+      
+      <div class="form-group">
+        <label>PR Number</label>
+        <input type="number" id="guard-pr" placeholder="e.g. 123">
+      </div>
+      <button onclick="runGuardian()">Check PR</button>
+      
+      <div id="guard-verdict"></div>
+      <div id="guard-comment"></div>
+      <div id="guard-post">
+        <button id="guard-post-button" onclick="postComment()" disabled title="Cannot post while DRY_RUN=true">Post to GitHub</button>
+        <span id="guard-post-status" aria-live="polite"></span>
+      </div>
+      <div id="guard-summary"></div>
+      <div id="guard-reviewers"></div>
+      <details id="guard-agent-log" style="margin-top: 1.5rem;">
+        <summary>Show agent steps</summary>
+        <div id="guard-steps" style="margin-top: 0.75rem;"></div>
+      </details>
+    </div>
+    
+    <div id="ask-tab" class="panel hide">
+      <h2>Ask</h2>
+      <p style="margin: 1rem 0; color: #8b949e;">Ask why code is the way it is. The agent walks the graph and cites evidence.</p>
+      
+      <div id="examples" style="margin-bottom: 1rem;"></div>
+      
+      <div class="form-group">
+        <label>Question</label>
+        <textarea id="question" rows="3" placeholder="Why does this project retry connections?"></textarea>
+      </div>
+      <button onclick="ask()">Ask</button>
+      
+      <div id="answer" style="margin-top: 1.5rem;"></div>
+      <div id="ask-steps"></div>
+    </div>
+    
+    <div id="busfactor-tab" class="panel hide">
+      <h2>Bus Factor</h2>
+      <p style="margin: 1rem 0; color: #8b949e;">Knowledge concentration: files where one person holds most of the work.</p>
+      <p style="margin: 0 0 1rem; color: #8b949e;">Connector score is betweenness in the collaboration graph; higher scores mean a person bridges more contributor paths through shared file work and reviews.</p>
+      <button onclick="loadBusFactor()">Load Analysis</button>
+      <div id="bf-audit"></div>
+      <div id="bf-data" style="margin-top: 1.5rem;"></div>
+    </div>
+    
+    <div class="panel graph">
+      <div id="graph-controls"><button type="button" onclick="fitGraph()">Fit</button></div>
+      <div id="graph-tooltip"></div>
+      <div id="graph-placeholder">Run a check to see the trace graph</div>
+      <div id="cy"></div>
+    </div>
+  </main>
+  
+  <script>
+    let cy;
+    let activeTab = 'guardian';
+    const graphStates = { guardian: null, ask: null, busfactor: null };
+    let currentData = {};
+    let resizeTimer;
+    let resizeFrameScheduled = false;
+    let cyInitialized = false;
+
+    if (typeof window.cytoscapeDagre === 'function') cytoscape.use(window.cytoscapeDagre);
+    
+    function initCy() {
+      if (cyInitialized) return;
+      cy = cytoscape({
+        container: document.getElementById('cy'),
+        style: [
+          {
+            selector: 'node',
+            style: {
+              'background-color': '#58a6ff',
+              'label': 'data(label)',
+              'text-valign': 'center',
+              'text-halign': 'center',
+              'font-size': '12px',
+              'min-zoomed-font-size': 0,
+              'width': 150,
+              'height': 54,
+              'padding': '5px',
+              'color': '#c9d1d9',
+              'text-wrap': 'wrap',
+              'text-max-width': '136px'
+            }
+          },
+          {
+            selector: 'node[type="File"]',
+            style: { 'background-color': '#238636', 'shape': 'rectangle' }
+          },
+          {
+            selector: 'node[type="Person"]',
+            style: { 'background-color': '#a371f7', 'shape': 'ellipse' }
+          },
+          {
+            selector: 'node[type="PullRequest"]',
+            style: { 'background-color': '#f85149', 'shape': 'diamond' }
+          },
+          {
+            selector: 'node[type="Issue"]',
+            style: { 'background-color': '#f0883e' }
+          },
+          {
+            selector: 'node[type="Decision"]',
+            style: { 'background-color': '#da3633', 'shape': 'hexagon' }
+          },
+          {
+            selector: 'node[conflict = "true"]',
+            style: { 'border-color': '#ff3b30', 'border-width': 5, 'border-opacity': 1 }
+          },
+          {
+            selector: 'node[type = "Decision"][conflict = "false"]',
+            style: { 'background-color': '#8b949e', 'opacity': 0.42, 'border-width': 0 }
+          },
+          {
+            selector: 'edge',
+            style: {
+              'width': 2,
+              'line-color': '#30363d',
+              'target-arrow-color': '#30363d',
+              'target-arrow-shape': 'triangle',
+              'curve-style': 'bezier',
+              'label': 'data(label)',
+              'text-rotation': 'autorotate',
+              'text-background-color': '#0d1117',
+              'text-background-opacity': 0.9,
+              'text-background-padding': '2px',
+              'font-size': '8px',
+              'min-zoomed-font-size': 0,
+              'color': '#8b949e'
+            }
+          },
+          {
+            selector: 'edge[type = "MAY_UNDO"]',
+            style: { 'line-color': '#ff3b30', 'target-arrow-color': '#ff3b30', 'width': 4 }
+          },
+          {
+            selector: 'edge[type = "CO_CHANGED_WITH"]',
+            style: { 'line-style': 'dashed', 'line-color': '#8b949e', 'target-arrow-shape': 'none' }
+          },
+          {
+            selector: 'edge[type = "SUGGESTED_REVIEWER"]',
+            style: { 'line-color': '#3fb950', 'target-arrow-color': '#3fb950' }
+          }
+        ],
+        layout: { name: 'preset', animate: false },
+        minZoom: 0.4,
+        maxZoom: 2.5
+      });
+      cyInitialized = true;
+      const graphContainer = document.querySelector('.panel.graph');
+      const resizeGraph = () => {
+        if (!cy || graphContainer.classList.contains('hide') || resizeFrameScheduled) return;
+        resizeFrameScheduled = true;
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          resizeFrameScheduled = false;
+          if (!cy || graphContainer.classList.contains('hide')) return;
+          cy.resize();
+          fitGraph();
+        }));
+      };
+      const graphResizeObserver = new ResizeObserver(() => resizeGraph());
+      graphResizeObserver.observe(graphContainer);
+      graphResizeObserver.observe(document.getElementById('cy'));
+      new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting)) resizeGraph();
+      }).observe(graphContainer);
+      window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(resizeGraph, 100);
+      });
+      cy.on('mouseover', 'edge', e => e.target.style('label', e.target.data('label') || e.target.data('type')));
+      cy.on('mouseout', 'edge', e => e.target.style('label', activeTab === 'guardian' ? (e.target.data('label') || '') : ''));
+      cy.on('mouseover', 'node', e => {
+        const tooltip = document.getElementById('graph-tooltip');
+        tooltip.textContent = e.target.data('title') || '';
+        const p = e.target.renderedPosition();
+        tooltip.style.left = `${p.x + 18}px`; tooltip.style.top = `${p.y + 18}px`;
+        tooltip.style.display = tooltip.textContent ? 'block' : 'none';
+      });
+      cy.on('mouseout', 'node', () => { document.getElementById('graph-tooltip').style.display = 'none'; });
+    }
+    
+    function showTab(name) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.panel:not(.graph)').forEach(p => p.classList.add('hide'));
+      document.querySelector(`.tab:nth-child(${name === 'guardian' ? 1 : name === 'ask' ? 2 : 3})`).classList.add('active');
+      document.getElementById(`${name}-tab`).classList.remove('hide');
+      activeTab = name;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        initCy();
+        cy.resize();
+        const stored = graphStates[name];
+        if (stored && stored.nodes.length) renderGraph(stored, name, false);
+        else showGraphPlaceholder(name);
+      }));
+      if (name === 'ask') loadExamples();
+      if (name === 'busfactor') loadBusFactor();
+    }
+
+    function placeholderFor(name) {
+      return name === 'guardian' ? 'Run a check to see the trace graph'
+        : name === 'busfactor' ? 'Click a flagged file to see its neighbourhood'
+        : 'Ask a question to see the trace graph';
+    }
+    function showGraphPlaceholder(name) {
+      cy.elements().remove();
+      document.getElementById('graph-placeholder').textContent = placeholderFor(name);
+      document.getElementById('graph-placeholder').style.display = 'block';
+    }
+    function clearGraph(name = activeTab) {
+      graphStates[name] = null;
+      if (name === activeTab) showGraphPlaceholder(name);
+    }
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function truncateWords(value, limit = 120) {
+      const text = String(value ?? '');
+      if (text.length <= limit) return text;
+      let cut = text.slice(0, limit + 1).lastIndexOf(' ');
+      if (cut <= 0) cut = text.indexOf(' ', limit);
+      return cut > 0 ? text.slice(0, cut).trimEnd() + '…' : text;
+    }
+    function basename(path) { return String(path || '').split(/[\\/]/).pop(); }
+    function tracedSubgraph(trace) {
+      const allowedTypes = new Set(['File', 'PullRequest', 'Issue', 'Decision', 'Person']);
+      const allNodes = trace?.nodes || [], allEdges = trace?.edges || [];
+      const referenced = new Set(allEdges.flatMap(e => [String(e.source), String(e.target)]));
+      const nodeLimit = activeTab === 'busfactor' ? 120 : 15;
+      const nodes = allNodes.filter(n => allowedTypes.has(n.type) && referenced.has(String(n.id))).slice(0, nodeLimit);
+      const kept = new Set(nodes.map(n => String(n.id)));
+      const edges = allEdges.filter(e => kept.has(String(e.source)) && kept.has(String(e.target))).slice(0, 30);
+      return { nodes, edges };
+    }
+    function renderGraph(trace, tab = activeTab, store = true) {
+      const graph = store ? tracedSubgraph(trace || {}) : (trace || {nodes: [], edges: []});
+      if (store) graphStates[tab] = graph;
+      if (tab !== activeTab) return;
+      if (!cyInitialized) initCy();
+      cy.elements().remove();
+      const nodes = graph.nodes || [], edges = graph.edges || [];
+      if (!nodes.length) { showGraphPlaceholder(tab); return; }
+      document.getElementById('graph-placeholder').style.display = 'none';
+      cy.add(nodes.map(n => {
+        const path = n.props?.path || (n.type === 'File' ? n.label : '');
+        const full = n.type === 'File' ? path : (n.props?.title || n.props?.summary || n.props?.rationale || n.props?.login || n.label || '');
+        const label = n.type === 'PullRequest' ? `#${n.props?.number || n.label}`
+          : n.type === 'Issue' && n.props?.number ? `issue #${n.props.number}`
+          : n.type === 'File' ? truncateWords(basename(path), 45) : truncateWords(n.label || full, 45);
+        return { data: { id: String(n.id), label, title: full, type: n.type, conflict: String(Boolean(n.conflict)) } };
+      }));
+      const edgeLabels = { MAY_UNDO: 'may undo', CO_CHANGED_WITH: 'changes with', SUGGESTED_REVIEWER: 'suggest', DECIDED_IN: 'decided in', CHECKED_DECISION: 'checked', TOUCHES: 'touches', AFFECTS: 'affects' };
+      cy.add(edges.map(e => ({ data: { id: `${e.source}-${e.target}-${e.type}`, source: String(e.source), target: String(e.target), type: e.type, label: activeTab === 'guardian' ? (edgeLabels[e.type] || e.type) : '' } })));
+      const layout = cy.layout(cyDagreAvailable() ? { name: 'dagre', rankDir: 'LR', nodeSep: 24, rankSep: 90, edgeSep: 12, fit: false, animate: false }
+        : { name: 'breadthfirst', directed: true, circle: false, spacingFactor: 0.7, fit: false, animate: false });
+      layout.one('layoutstop', () => fitGraph());
+      layout.run();
+    }
+    function cyDagreAvailable() { return typeof window.cytoscapeDagre === 'function'; }
+    function fitGraph() {
+      if (!cy || !cy.elements().length) return;
+      cy.resize();
+      cy.fit(cy.elements(), 40);
+      let attempts = 0;
+      while (activeTab !== 'busfactor' && cy.zoom() < 0.5 && cy.nodes().length > 2 && attempts++ < 13) {
+        const ids = new Set(cy.nodes().map(n => n.id()));
+        const stored = graphStates[activeTab];
+        const removeId = (stored?.nodes || []).map(n => String(n.id)).reverse().find(id => ids.has(id));
+        if (!removeId) break;
+        cy.remove(cy.getElementById(removeId));
+        if (stored) {
+          stored.nodes = stored.nodes.filter(n => String(n.id) !== removeId);
+          stored.edges = stored.edges.filter(e => String(e.source) !== removeId && String(e.target) !== removeId);
+        }
+        cy.layout(cyDagreAvailable() ? { name: 'dagre', rankDir: 'LR', nodeSep: 24, rankSep: 90, fit: false, animate: false }
+          : { name: 'breadthfirst', directed: true, circle: false, spacingFactor: 0.7, fit: false, animate: false }).run();
+        cy.fit(cy.elements(), 40);
+      }
+      if (typeof cy.forceRender === 'function') cy.forceRender();
+    }
+    
+    async function runGuardian() {
+      const pr = document.getElementById('guard-pr').value;
+      if (!pr) return alert('Enter a PR number');
+      
+      // Save PR number for next time
+      localStorage.setItem('lastGuardianPR', pr);
+      const log = document.getElementById('guard-agent-log');
+      log.open = true;
+      document.getElementById('guard-verdict').innerHTML = '<div class="loading">Guardian is checking the PR…</div>';
+      document.getElementById('guard-steps').innerHTML = '<div class="loading">Running guardian...</div>';
+      document.getElementById('guard-comment').innerHTML = '';
+      document.getElementById('guard-post').classList.remove('hide');
+      document.getElementById('guard-post-button').disabled = true;
+      if (!localStorage.getItem(postedCommentKey(pr))) await restorePostedComment(pr);
+      const savedPostUrl = localStorage.getItem(postedCommentKey(pr));
+      document.getElementById('guard-post-button').textContent = savedPostUrl ? 'Update comment' : 'Post to GitHub';
+      renderPostedStatus(savedPostUrl);
+      document.getElementById('guard-reviewers').innerHTML = '';
+      document.getElementById('guard-summary').innerHTML = '';
+      
+      try {
+        clearGraph('guardian');
+        const res = await fetch('/api/guard/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pr_number: parseInt(pr) })
+        });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '', data = null;
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, {stream:true});
+          const frames = buffer.split('\n\n'); buffer = frames.pop();
+          for (const frame of frames) {
+            const kind = frame.match(/^event: (.+)$/m)?.[1];
+            const payload = frame.match(/^data: (.+)$/m)?.[1];
+            if (!payload) continue;
+            const item = JSON.parse(payload);
+            if (kind === 'step') document.getElementById('guard-steps').insertAdjacentHTML('beforeend', `<div class="step" title="${escapeHtml(item.summary || '')}"><strong>${escapeHtml(item.tool)}</strong>: ${escapeHtml(truncateWords(item.summary || ''))}</div>`);
+            if (kind === 'error') throw new Error(item.error);
+            if (kind === 'result') data = item;
+          }
+        }
+        if (!data) throw new Error('Guardian stream ended without a result');
+        currentData.guard = data;
+        
+        let html = '';
+        data.steps.forEach(s => {
+          html += `<div class="step" title="${escapeHtml(s.summary || '')}"><strong>${escapeHtml(s.tool)}</strong>: ${escapeHtml(truncateWords(s.summary || ''))}</div>`;
+        });
+        document.getElementById('guard-steps').innerHTML = html;
+
+        const checks = data.decision_checks || [];
+        const conflicts = checks.filter(c => c.conflict);
+        const changed = data.changed_files || [];
+        const color = conflicts.length ? '#f85149' : '#3fb950';
+        const checkedTotal = Number(data.checked_decision_count ?? checks.length);
+        const allTotal = Number(data.total_decision_count ?? data.decisions_found?.length ?? checks.length);
+        const headline = conflicts.length
+          ? `⚠️ ${conflicts.length} potential conflict${conflicts.length === 1 ? '' : 's'} across ${changed.length} changed file${changed.length === 1 ? '' : 's'}`
+          : `✓ No conflicts found; checked ${checkedTotal} of ${allTotal} decisions across ${changed.length} changed files`;
+        const fileList = changed.length ? changed.map(f => `<li><code title="${escapeHtml(f)}">${escapeHtml(truncateWords(f))}</code></li>`).join('') : '<li>GitHub returned no changed files.</li>';
+        const checkList = checks.length ? checks.map(c => {
+          const state = c.conflict ? 'CONFLICT' : 'No conflict';
+          const refs = (c.decided_in || []).filter(s => s.url && s.number != null && ['PullRequest','Issue'].includes(s.type)).map(s => `<a href="${escapeHtml(s.url)}" target="_blank" rel="noopener">${s.type === 'Issue' ? 'issue' : 'PR'} #${escapeHtml(s.number)}</a>`).join(' · ');
+          return `<li><strong>${state}</strong> — <span title="${escapeHtml(c.summary)}">${escapeHtml(truncateWords(c.summary))}</span><br><span title="${escapeHtml(c.path)}">${escapeHtml(truncateWords(c.path))}${refs ? ` · ${refs}` : ''}</span><br>${escapeHtml(c.reason || 'No additional reason returned.')}</li>`;
+        }).join('') : '<li>No decisions were recorded for the changed files.</li>';
+        const blast = (data.blast_radius || []).map(f => `<li>${escapeHtml(f.path)} (${escapeHtml(f.shared_prs ?? f.prs ?? '')} shared PRs)</li>`).join('') || '<li>No related files returned.</li>';
+        const reviewerRows = (data.reviewer_details || []).map(r => `<li>${escapeHtml(r.login)} — score ${Number(r.score || 0).toFixed(4)}, connector ${Number(r.connector_score || 0).toFixed(6)}</li>`).join('') || '<li>No reviewers returned.</li>';
+        document.getElementById('guard-verdict').innerHTML = `<p style="font-size:1.1rem;font-weight:600;margin:1rem 0;color:${color}">${escapeHtml(headline)}</p>`;
+        document.getElementById('guard-summary').innerHTML = `<h3>Changed files</h3><ul>${fileList}</ul><h3>Decisions checked</h3><p style="color:#8b949e">${escapeHtml(data.decision_check_note || `Checked ${checkedTotal} of ${allTotal} decisions.`)}</p><ul>${checkList}</ul><h3>Blast radius</h3><ul>${blast}</ul>`;
+        if (data.drafted_comment) {
+          document.getElementById('guard-comment').innerHTML = `<h3>Drafted Comment</h3><div class="comment-box"><label for="guard-drafted-comment">Markdown comment</label><textarea id="guard-drafted-comment" spellcheck="true" oninput="updatePostButton()">${escapeHtml(data.drafted_comment)}</textarea></div>`;
+        } else {
+          document.getElementById('guard-comment').innerHTML = '<p>No comment drafted because none of the checked decisions conflict.</p>';
+        }
+        const reviewerWrite = data.reviewer_request_result?.skipped ? `<p style="color:#f0883e">${escapeHtml(data.reviewer_request_result.message)}</p>` : data.reviewer_request_result?.error ? `<p style="color:#f0883e">GitHub did not accept the reviewer request: ${escapeHtml(data.reviewer_request_result.error)}</p>` : data.reviewer_request_result?.requested ? '<p>Reviewer request sent to GitHub.</p>' : '';
+        document.getElementById('guard-reviewers').innerHTML = `<h3>Suggested reviewers</h3><p style="color:#8b949e">Excluded PR author: ${escapeHtml(data.author || 'unknown')} · ${escapeHtml(data.connector_algorithm || 'connector algorithm unavailable')}</p><ul>${reviewerRows}</ul>${reviewerWrite}`;
+        const postedUrl = data.post_result?.url || localStorage.getItem(postedCommentKey(data.pr_number));
+        currentData.guard.postedUrl = postedUrl || null;
+        renderPostedStatus(postedUrl);
+        document.getElementById('guard-post-button').textContent = postedUrl ? 'Update comment' : 'Post to GitHub';
+        updatePostButton(Boolean(data.dry_run));
+        log.open = false;
+        
+        renderGraph(data.graph || data.trace, 'guardian');
+      } catch (err) {
+        document.getElementById('guard-steps').innerHTML = `<p style="color:#f85149;">Error: ${err.message}</p>`;
+        document.getElementById('guard-verdict').innerHTML = `<p style="color:#f85149">Guardian failed: ${escapeHtml(err.message)}</p>`;
+        document.getElementById('guard-agent-log').open = false;
+      }
+    }
+    
+    async function postComment() {
+      const data = currentData.guard;
+      const textarea = document.getElementById('guard-drafted-comment');
+      if (!data || !textarea || !textarea.value.trim() || data.dry_run) return;
+      const button = document.getElementById('guard-post-button');
+      button.disabled = true;
+      button.textContent = data.postedUrl ? 'Updating…' : 'Posting…';
+      document.getElementById('guard-post-status').textContent = '';
+      try {
+        const res = await fetch('/api/guard/post', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pr_number: data.pr_number,
+            body: textarea.value
+          })
+        });
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.detail || 'GitHub rejected the comment');
+        data.drafted_comment = textarea.value;
+        data.postedUrl = result.url;
+        if (result.url) localStorage.setItem(postedCommentKey(data.pr_number), result.url);
+        renderPostedStatus(result.url);
+        button.textContent = 'Update comment';
+      } catch (err) {
+        document.getElementById('guard-post-status').textContent = 'Post failed: ' + err.message;
+        button.textContent = data.postedUrl ? 'Update comment' : 'Post to GitHub';
+      } finally {
+        updatePostButton(Boolean(data.dry_run));
+      }
+    }
+
+    function updatePostButton(dryRun = Boolean(currentData.guard?.dry_run)) {
+      const button = document.getElementById('guard-post-button');
+      const textarea = document.getElementById('guard-drafted-comment');
+      if (!button) return;
+      button.title = dryRun ? 'Cannot post while DRY_RUN=true' : '';
+      if (!button.textContent.endsWith('…'))
+        button.disabled = Boolean(dryRun || !textarea || !textarea.value.trim());
+    }
+
+    function postedCommentKey(prNumber) { return `guardianPostedComment:${prNumber}`; }
+
+    function renderPostedStatus(url) {
+      document.getElementById('guard-post-status').innerHTML = url
+        ? `Posted · <a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open posted comment</a>`
+        : '';
+    }
+
+    async function restorePostedComment(prNumber) {
+      try {
+        const response = await fetch(`/api/guard/comment/${encodeURIComponent(prNumber)}`);
+        if (!response.ok) return;
+        const result = await response.json();
+        if (!result.url) return;
+        localStorage.setItem(postedCommentKey(prNumber), result.url);
+        renderPostedStatus(result.url);
+        document.getElementById('guard-post-button').textContent = 'Update comment';
+        if (currentData.guard?.pr_number == prNumber) currentData.guard.postedUrl = result.url;
+      } catch (_) {
+        // Link restoration is best-effort; it does not affect the Guardian check.
+      }
+    }
+    
+    async function loadExamples() {
+      try {
+        const res = await fetch('/api/examples');
+        const data = await res.json();
+        let html = '<h3>Example questions</h3>';
+        data.questions.forEach(q => {
+          html += `<div class="example" onclick="document.getElementById('question').value='${q.replace(/'/g, "\\'")}'">${q}</div>`;
+        });
+        document.getElementById('examples').innerHTML = html;
+      } catch {}
+    }
+    
+    async function ask() {
+      const q = document.getElementById('question').value;
+      if (!q) return alert('Enter a question');
+      
+      document.getElementById('answer').innerHTML = '<div class="loading">Asking...</div>';
+      try {
+        const res = await fetch('/api/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question: q })
+        });
+        const data = await res.json();
+        
+        // Link only explicitly typed references backed by a real trace node.
+        const sourceNodes = data.graph?.nodes || data.trace?.nodes || [];
+        const references = new Map();
+        sourceNodes.forEach(n => {
+          const number = n.props?.number;
+          const type = n.type === 'PullRequest' ? 'PR' : n.type === 'Issue' ? 'issue' : null;
+          const repo = n.props?.repo || 'psf/requests';
+          const url = type && number != null ? `https://github.com/${repo}/${type === 'issue' ? 'issues' : 'pull'}/${number}` : null;
+          if (type && number != null && url) references.set(`${type.toLowerCase()}:${number}`, url);
+        });
+        const allowedUrls = new Set(references.values());
+        let answerText = data.answer;
+        const sourcesAt = answerText.search(/\n\s*\**Sources:\**\s*/i);
+        if (sourcesAt >= 0 && (/\[[^\]]+\]\(https?:\/\//i.test(answerText.slice(0, sourcesAt)) || /\b(?:PR|PullRequest|issue)\s+#\d+\b/i.test(answerText.slice(0, sourcesAt)))) answerText = answerText.slice(0, sourcesAt).trimEnd();
+        const sourceOnlyLinks = answerText
+          .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/gi, (match, label, url) => allowedUrls.has(url) ? match : label)
+          .replace(/https?:\/\/github\.com\/[^\s)]+/gi, url => allowedUrls.has(url.replace(/[.,]+$/, '')) ? url : '');
+        const linkedAnswer = sourceOnlyLinks.replace(/\b(PR|pull request|issue)\s+#(\d+)\b/gi, (match, label, num) => {
+          const type = label.toLowerCase() === 'issue' ? 'issue' : 'PR';
+          const url = references.get(`${type.toLowerCase()}:${num}`);
+          return url ? `[${match}](${url})` : match;
+        });
+        const rawHtml = marked.parse(linkedAnswer);
+        const cleanHtml = DOMPurify.sanitize(rawHtml);
+        
+        document.getElementById('answer').innerHTML = 
+          `<h3>Answer</h3><div style="line-height:1.8">${cleanHtml}</div>`;
+        
+        let html = '<h3>Trace</h3>';
+        const compactSteps = [];
+        data.steps.forEach(s => {
+          const previous = compactSteps[compactSteps.length - 1];
+          if (previous && previous.tool === s.tool && previous.summary === s.summary) previous.count++;
+          else compactSteps.push({...s, count: 1});
+        });
+        compactSteps.forEach(s => {
+          // Show what was found in words
+          let detail = s.summary;
+          if (s.tool === 'who_knows_file' && s.nodes) {
+            const people = s.nodes.filter(n => n.type === 'Person').slice(0, 3);
+            if (people.length > 0) {
+              detail = people.map(p => {
+                const login = p.props?.login || p.label;
+                return `${login}`;
+              }).join(', ');
+            }
+          }
+          html += `<div class="step" title="${escapeHtml(detail || '')}"><strong>${escapeHtml(s.tool)}</strong>${s.count > 1 ? ` ×${s.count}` : ''}: ${escapeHtml(truncateWords(detail || ''))}</div>`;
+        });
+        document.getElementById('ask-steps').innerHTML = html;
+        
+        renderGraph(data.graph || data.trace, 'ask');
+      } catch (err) {
+        document.getElementById('answer').innerHTML = `<p style="color:#f85149;">Error: ${err.message}</p>`;
+      }
+    }
+    
+    async function loadBusFactor() {
+      document.getElementById('bf-data').innerHTML = '<div class="loading">Loading...</div>';
+      try {
+        const res = await fetch('/api/bus-factor');
+        const data = await res.json();
+        const audit = data.sessions_pr_audit;
+        document.getElementById('bf-audit').innerHTML = audit
+          ? `<p class="step"><strong>Count audit:</strong> ${escapeHtml(audit.path)} has ${audit.graph_distinct_merged_prs} distinct merged PRs in FalkorDB and ${audit.cached_github_distinct_merged_prs} in cached GitHub data (${audit.cached_merged_prs_examined} merged PRs examined).</p>`
+          : '';
+        
+        let html = '<h3>Flagged Files</h3>';
+        data.flagged.slice(0, 15).forEach(f => {
+          const pct = Math.round(f.top_share * 100);
+          // Older running servers did not return top_pr_count; recover the
+          // displayed numerator from the stored share and denominator.
+          const topPrCount = Number.isFinite(f.top_pr_count) ? f.top_pr_count : Math.round(f.top_share * f.prs);
+          html += `<div style="margin-bottom:0.5rem;">
+            <span class="bar" style="width:${pct}px"></span>
+            <strong>${pct}%</strong> ${escapeHtml(f.top_person)} – authored or reviewed ${topPrCount} of ${f.prs} merged PRs: <button class="file-neighborhood" data-path="${escapeHtml(f.path)}" data-owner="${escapeHtml(f.top_person)}" data-prs="${escapeHtml(JSON.stringify(f.qualifying_prs || f.supporting_prs || []))}">${escapeHtml(f.path)}</button><br><small>N counts distinct merged PRs touching this file in the last ${data.window_days} days, excluding release, bump, version, and over-15-file PRs. The numerator counts the top person once per PR they authored or reviewed.</small>
+          </div>`;
+        });
+        
+        html += '<h3 style="margin-top:1.5rem;">Connectors</h3>';
+        html += `<p style="color:#8b949e;margin-bottom:0.5rem;">Algorithm: ${data.connector_algorithm}</p>`;
+        data.connectors.slice(0, 10).forEach(p => {
+          html += `<div>${p.login} – score ${p.score.toFixed(4)}</div>`;
+        });
+        
+        document.getElementById('bf-data').innerHTML = html;
+        document.querySelectorAll('.file-neighborhood').forEach(button => button.addEventListener('click', () => loadNeighborhood(button.dataset.path, button.dataset.owner, JSON.parse(button.dataset.prs || '[]'))));
+      } catch (err) {
+        document.getElementById('bf-data').innerHTML = `<p style="color:#f85149;">Error: ${err.message}</p>`;
+      }
+    }
+
+    async function loadNeighborhood(path, owner, prs = []) {
+      clearGraph('busfactor');
+      try {
+        const params = new URLSearchParams({path, owner, prs: prs.join(',')});
+        let res = await fetch('/api/graph/bus-factor?' + params.toString());
+        let data = res.ok ? await res.json() : null;
+        let trace = data?.trace;
+        // Compatibility with an already-running server from before the
+        // exact-PR Bus Factor route was added. The neighborhood route returns
+        // the trace under the same field and keeps the panel useful.
+        if (!res.ok || !trace?.nodes?.length) {
+          const fallback = new URLSearchParams({path, owner});
+          res = await fetch('/api/graph/neighborhood?' + fallback.toString());
+          if (!res.ok) throw new Error(`Graph request failed (${res.status})`);
+          data = await res.json();
+          trace = data.trace;
+        }
+        if (trace?.nodes?.length) renderGraph(trace, 'busfactor');
+        else showGraphPlaceholder('busfactor');
+      } catch (err) {
+        showGraphPlaceholder('busfactor');
+        document.getElementById('bf-data').insertAdjacentHTML('beforeend', `<p style="color:#f85149">${escapeHtml(err.message)}</p>`);
+      }
+    }
+    
+    document.getElementById('guard-pr').value = localStorage.getItem('lastGuardianPR') || '1';
+    const restoredPostUrl = localStorage.getItem(postedCommentKey(document.getElementById('guard-pr').value));
+    if (restoredPostUrl) {
+      renderPostedStatus(restoredPostUrl);
+      document.getElementById('guard-post-button').textContent = 'Update comment';
+    }
+    else void restorePostedComment(document.getElementById('guard-pr').value);
+    showTab('guardian');
+  </script>
+</body>
+</html>
